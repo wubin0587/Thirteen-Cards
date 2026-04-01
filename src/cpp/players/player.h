@@ -1,0 +1,115 @@
+#ifndef PLAYER_H
+#define PLAYER_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* --------------------------------------------------------------
+ *  成就枚举（对应特殊牌型或高分普通牌型），使用 32 位位图保存
+ * -------------------------------------------------------------- */
+typedef enum {
+    ACHV_ROYAL_STRAIGHT_FLUSH_13 = 0,   // 至尊清龙
+    ACHV_STRAIGHT_13             = 1,   // 一条龙
+    ACHV_TWELVE_ROYALS           = 2,   // 十二皇族
+    ACHV_THREE_STRAIGHT_FLUSH    = 3,   // 三同花顺
+    ACHV_THREE_FOUR_OF_A_KIND    = 4,   // 三分天下
+    ACHV_FIVE_OF_A_KIND_MIDDLE   = 5,   // 中墩五同
+    ACHV_FIVE_OF_A_KIND_TAIL     = 6,   // 尾墩五同
+    ACHV_MAX                     = 32   // 位图上限（32 位）
+} Achievement;
+
+/* --------------------------------------------------------------
+ *  前置声明（实现位于 player.cpp）
+ * -------------------------------------------------------------- */
+class Player;
+class PlayerRound;
+class PlayerStats;
+
+#ifdef __cplusplus
+}
+#endif
+
+/* -----------------------------------------------------------------
+ *  基础类 Player
+ * ----------------------------------------------------------------- */
+class Player {
+protected:
+    char*   m_name;                // UTF‑8 名称（malloc 管理）
+    int     m_totalScore;          // 累计总分
+    unsigned int m_achievements;   // 32 位位图
+
+    /* 内部工具：复制 UTF‑8 字符串 */
+    static char* dup_utf8(const char* src);
+
+public:
+    explicit Player(const char* name = "Player");
+    virtual ~Player();
+
+    /* 名称 ------------------------------------------------------ */
+    const char* getName() const;
+    void        setName(const char* name);
+
+    /* 分数 ------------------------------------------------------ */
+    int  getTotalScore() const;
+    void addScore(int delta);          // 累加
+
+    /* 成就 ------------------------------------------------------ */
+    void addAchievement(Achievement a);
+    bool hasAchievement(Achievement a) const;
+};
+
+/* -----------------------------------------------------------------
+ *  本局玩家（持有手牌 Pattern）
+ * ----------------------------------------------------------------- */
+class PlayerRound : public Player {
+private:
+    struct Pattern* m_pat;        // 由 pattern_init / pattern_destroy 管理
+    int            m_roundScore; // 本局得分，-1 表示未结算
+    bool           m_isSpecial;  // true 表示已经是特殊 13 张牌型
+
+public:
+    explicit PlayerRound(const char* name = "RoundPlayer");
+    virtual ~PlayerRound();
+
+    /* 接收 13 张手牌 ------------------------------------------------
+     * 若手牌属于 13 张特殊牌型（search_pattern(3,…,13) 返回非
+     * “Unknown”），则直接记分、解锁成就并把 m_isSpecial 设为 true。
+     * 返回 0 表示成功，非 0 为错误码。 */
+    int receiveHand(const int hand13[13]);
+
+    /* 提交墩位 ----------------------------------------------------
+     * 仅在非特殊牌型（m_isSpecial == false）时可调用。 */
+    int setPosition(int position, const int* cards, int cnt);
+
+    /* 结算本局 ----------------------------------------------------
+     * - 若是特殊牌型，直接返回已经算好的 m_roundScore。  
+     * - 否则依据三墩计算分数、累计总分并检测成就。 */
+    int settle();
+
+    /* 读取本局得分（结算后才有意义） --------------------------- */
+    int getRoundScore() const;
+};
+
+/* -----------------------------------------------------------------
+ *  统计玩家（保存每局得分历史）
+ * ----------------------------------------------------------------- */
+class PlayerStats : public Player {
+private:
+    static const int MAX_ROUNDS = 1024;
+    int  m_roundScores[MAX_ROUNDS];
+    int  m_roundCount;                 // 已记录局数
+
+public:
+    explicit PlayerStats(const char* name = "StatsPlayer");
+    virtual ~PlayerStats();
+
+    /* 新增一局已结算的分数 -------------------------------------- */
+    int addRoundScore(int roundScore); // 0 成功，-1 失败（超出上限）
+
+    /* 查询历史 ---------------------------------------------------- */
+    int getRoundCount() const;
+    int getRoundScore(int idx) const; // idx 0‑based，非法返回 -1
+};
+
+#endif // PLAYER_H
