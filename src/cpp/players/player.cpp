@@ -1,6 +1,5 @@
 #include "player.h"
 #include "pattern.h"
-#include "searchPattern.cpp"          // 直接包含实现，避免额外链接
 
 #include <stdlib.h>   // malloc / free
 #include <string.h>   // strlen / memcpy / strcmp
@@ -172,6 +171,17 @@ int PlayerRound::settle()
 
 /* 读取本局得分 ------------------------------------------------- */
 int PlayerRound::getRoundScore() const { return m_roundScore; }
+
+/* 重置局状态 ------------------------------------------------- */
+void PlayerRound::resetRound()
+{
+    if (m_pat) {
+        free(m_pat);
+        m_pat = nullptr;
+    }
+    m_roundScore = -1;
+    m_isSpecial = false;
+}
 
 /*==================================================================
  *  PlayerStats

@@ -4,7 +4,6 @@
 // ---------------------------------------------------------------
 
 #include "pattern.h"
-#include "searchPattern.cpp"
 
 #include <cstring>
 
