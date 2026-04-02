@@ -1,6 +1,8 @@
 #ifndef PLAYER_H
 #define PLAYER_H
 
+#include "pattern/pattern.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,7 +66,7 @@ public:
  * ----------------------------------------------------------------- */
 class PlayerRound : public Player {
 private:
-    struct Pattern* m_pat;        // 由 pattern_init / pattern_destroy 管理
+    Pattern* m_pat;        // 由 pattern_init / pattern_destroy 管理
     int            m_roundScore; // 本局得分，-1 表示未结算
     bool           m_isSpecial;  // true 表示已经是特殊 13 张牌型
 
@@ -89,6 +91,7 @@ public:
 
     /* 读取本局得分（结算后才有意义） --------------------------- */
     int getRoundScore() const;
+    void resetRound();
 };
 
 /* -----------------------------------------------------------------
@@ -128,7 +131,7 @@ bool removeFromPile(HandManager *mgr, int position, int idx);
 bool undo(HandManager *mgr);
 bool pileFull(const HandManager *mgr, int position);
 
-bool submit(HandManager *mgr, struct Pattern *pat);
+bool submit(HandManager *mgr, Pattern *pat);
 }
 
 #endif // PLAYER_H
