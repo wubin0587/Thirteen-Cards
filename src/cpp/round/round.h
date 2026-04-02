@@ -121,7 +121,20 @@ static inline void round_cleanup(Round *r)
     r->deck_pos   = 0;
 }
 
+/*--------------------------------------------------------------
+ *  round 模块其它实现（定义在 src/cpp/round/*.cpp）
+ *--------------------------------------------------------------*/
+int round_shuffle(Round *r);
+int round_deal(Round *r);
+int round_close(Round *r);
+
 #ifdef __cplusplus
+}
+
+namespace evaluate {
+struct HandManager;
+bool hasValidPattern(HandManager *mgr, int position,
+                     int out_combos[][5], int &out_cnt);
 }
 #endif
 

@@ -377,15 +377,6 @@ static const thirteencards::HandTableEntry* check_special(const int *cards)
  *--------------------------------------------------------------------*/
 extern "C"
 {
-    /* 统一返回值：拷贝一份 HandTableEntry，若未匹配则
-       position 为 -1，score 为 0，hand_name 为 "Unknown".   */
-    typedef struct {
-        int   position;      /* 0=head,1=middle,2=tail,3=special */
-        const char* hand_name;
-        int   rank_order;
-        int   score;
-    } HandResult;
-
     static HandResult make_unknown(int pos)
     {
         HandResult r;
@@ -606,13 +597,13 @@ extern "C"
         int has_four_kind;      // 是否至少包含一个铁支 (同 exact_fours > 0)
         int has_straight_flush; // 是否至少包含一个同花顺
         int has_five_kind;      // 是否至少包含一个五同 (同 exact_fives > 0)
-        
+
         /* 详细阵列信息 (可选，供进一步提牌使用) */
         int flush_suits[4];         // 记录四种花色各自拥有的牌数 (>=5即可组成同花)
         int straight_starts[13];    // 记录可作为顺子起点的点数 (1表示可作为顺子起点)
     } ThirteenCardsRegularStatus;
 
-    /* 
+    /*
      * 函数名：analyze_13cards_regular_patterns
      * 功能：传入 13 张牌的数组，输出其中包含的所有常规牌型的统计信息
      * 参数：
@@ -633,7 +624,7 @@ extern "C"
             int id = cards[i];
             int r  = card_rank(id); // 0=2, 1=3, ..., 12=A
             int s  = card_suit(id); // 0~3
-            
+
             rank_cnt[r]++;
             suit_cnt[s]++;
             suit_ranks[s][r]++;
@@ -653,7 +644,7 @@ extern "C"
         out_status->has_three_kind = (out_status->exact_threes > 0 || out_status->exact_fours > 0 || out_status->exact_fives > 0) ? 1 : 0;
         out_status->has_pair       = (out_status->exact_pairs > 0 || out_status->has_three_kind) ? 1 : 0;
 
-        // 4. 判定两对 (Two Pair) 
+        // 4. 判定两对 (Two Pair)
         // 形成两对的条件：有两组以上的对子(或三条等)，或者有一个铁支/五同可以拆成两对
         if (out_status->exact_fives >= 1 || out_status->exact_fours >= 1) {
             out_status->has_two_pair = 1; // 铁支或五同可拆为两对
@@ -667,7 +658,7 @@ extern "C"
         if (out_status->exact_fives >= 1) {
             out_status->has_full_house = 1; // AAA+AA
         } else if (out_status->exact_fours >= 1 && (out_status->exact_pairs >= 1 || out_status->exact_threes >= 1)) {
-            out_status->has_full_house = 1; 
+            out_status->has_full_house = 1;
         } else if (out_status->exact_threes >= 2) {
             out_status->has_full_house = 1; // 两个三条可以抽出一个葫芦
         } else if (out_status->exact_threes >= 1 && out_status->exact_pairs >= 1) {
@@ -685,14 +676,14 @@ extern "C"
         // 7. 判定顺子 (Straight)
         // 遍历所有可能的起始点 0(2) 到 8(10)
         for (int i = 0; i <= 8; ++i) {
-            if (rank_cnt[i] > 0 && rank_cnt[i+1] > 0 && rank_cnt[i+2] > 0 && 
+            if (rank_cnt[i] > 0 && rank_cnt[i+1] > 0 && rank_cnt[i+2] > 0 &&
                 rank_cnt[i+3] > 0 && rank_cnt[i+4] > 0) {
                 out_status->has_straight = 1;
                 out_status->straight_starts[i] = 1;
             }
         }
         // 特殊顺子：A-2-3-4-5 (12(A) 和 0,1,2,3)
-        if (rank_cnt[12] > 0 && rank_cnt[0] > 0 && rank_cnt[1] > 0 && 
+        if (rank_cnt[12] > 0 && rank_cnt[0] > 0 && rank_cnt[1] > 0 &&
             rank_cnt[2] > 0 && rank_cnt[3] > 0) {
             out_status->has_straight = 1;
             out_status->straight_starts[12] = 1; // 用 12 表示 A2345 起点
@@ -702,10 +693,10 @@ extern "C"
         // 在满足同花的 suit 中寻找顺子
         for (int s = 0; s < 4; ++s) {
             if (suit_cnt[s] < 5) continue;
-            
+
             // 常规同花顺
             for (int i = 0; i <= 8; ++i) {
-                if (suit_ranks[s][i] > 0 && suit_ranks[s][i+1] > 0 && suit_ranks[s][i+2] > 0 && 
+                if (suit_ranks[s][i] > 0 && suit_ranks[s][i+1] > 0 && suit_ranks[s][i+2] > 0 &&
                     suit_ranks[s][i+3] > 0 && suit_ranks[s][i+4] > 0) {
                     out_status->has_straight_flush = 1;
                     break;
@@ -713,7 +704,7 @@ extern "C"
             }
             // A-2-3-4-5 同花顺
             if (!out_status->has_straight_flush) {
-                if (suit_ranks[s][12] > 0 && suit_ranks[s][0] > 0 && suit_ranks[s][1] > 0 && 
+                if (suit_ranks[s][12] > 0 && suit_ranks[s][0] > 0 && suit_ranks[s][1] > 0 &&
                     suit_ranks[s][2] > 0 && suit_ranks[s][3] > 0) {
                     out_status->has_straight_flush = 1;
                 }

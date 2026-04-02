@@ -72,6 +72,26 @@ int pattern_set_position(Pattern* p, int position,
  */
 int pattern_sort(Pattern* p);
 
+/**
+ * @brief 牌型查询结果（由 search_pattern 返回）。
+ */
+typedef struct {
+    int         position;   /**< 0=head,1=middle,2=tail,3=special */
+    const char* hand_name;  /**< 牌型名称，未命中时为 "Unknown" */
+    int         rank_order; /**< 牌型等级（越大越强） */
+    int         score;      /**< 对应水数 */
+} HandResult;
+
+/**
+ * @brief 根据墩位和牌组搜索牌型。
+ *
+ * @param position 0=head,1=middle,2=tail,3=special。
+ * @param cards    牌号数组。
+ * @param cnt      牌数（3/5/13）。
+ * @return HandResult 牌型结果。
+ */
+HandResult search_pattern(int position, const int* cards, int cnt);
+
 #ifdef __cplusplus
 }
 #endif
