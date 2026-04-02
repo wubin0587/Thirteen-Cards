@@ -83,7 +83,7 @@ public:
     int setPosition(int position, const int* cards, int cnt);
 
     /* 结算本局 ----------------------------------------------------
-     * - 若是特殊牌型，直接返回已经算好的 m_roundScore。  
+     * - 若是特殊牌型，直接返回已经算好的 m_roundScore。
      * - 否则依据三墩计算分数、累计总分并检测成就。 */
     int settle();
 
@@ -111,5 +111,24 @@ public:
     int getRoundCount() const;
     int getRoundScore(int idx) const; // idx 0‑based，非法返回 -1
 };
+
+/* -----------------------------------------------------------------
+ *  交互管理（实现位于 interaction.cpp）
+ * ----------------------------------------------------------------- */
+namespace evaluate {
+struct HandManager;
+
+HandManager* createManager(const int hand13[13]);
+void destroyManager(HandManager *mgr);
+
+bool selectCard(HandManager *mgr, int idx);
+bool deselectCard(HandManager *mgr, int idx);
+bool addToPile(HandManager *mgr, int position, int idx);
+bool removeFromPile(HandManager *mgr, int position, int idx);
+bool undo(HandManager *mgr);
+bool pileFull(const HandManager *mgr, int position);
+
+bool submit(HandManager *mgr, struct Pattern *pat);
+}
 
 #endif // PLAYER_H
