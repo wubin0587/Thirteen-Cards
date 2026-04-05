@@ -92,6 +92,43 @@ typedef struct {
  */
 HandResult search_pattern(int position, const int* cards, int cnt);
 
+
+/**
+ * @brief DFS 输出中的单个“有牌型墩”信息。
+ */
+typedef struct {
+    int        position;    /**< 0=head,1=middle,2=tail */
+    int        card_count;  /**< 3 或 5 */
+    int        cards[5];    /**< 实际牌号，头墩仅前 3 张有效 */
+    HandResult result;      /**< 该墩牌型结果 */
+} TypedPileResult;
+
+/**
+ * @brief DFS 自动分墩结果。
+ */
+typedef struct {
+    int               is_special;          /**< 1=命中特殊牌型 */
+    int               special_score;       /**< 特殊牌型分数 */
+    const char*       special_name;        /**< 特殊牌型名称 */
+
+    int               typed_score;         /**< 有牌型墩总分 */
+    int               typed_count;         /**< typed_piles 实际数量，0~3 */
+    TypedPileResult   typed_piles[3];      /**< 有牌型墩列表 */
+
+    int               occupied_positions;  /**< bit0=head, bit1=middle, bit2=tail */
+    int               loose_count;         /**< loose_cards 实际数量，0~13 */
+    int               loose_cards[13];     /**< 未锁定到有牌型墩的散牌 */
+} DFSResult;
+
+/**
+ * @brief 使用 DFS 搜索“有牌型墩分数最大化”的最优方案。
+ *
+ * @param hand13 13 张手牌（牌号数组）。
+ * @param out    DFS 输出结构。
+ * @return 0 成功，非 0 为错误码。
+ */
+int dfs_find_best_pattern(const int hand13[13], DFSResult* out);
+
 #ifdef __cplusplus
 }
 #endif

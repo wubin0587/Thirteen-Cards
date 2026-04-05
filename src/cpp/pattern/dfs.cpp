@@ -12,7 +12,6 @@
  *    - typed_piles 至少有1个有效条目（is_special=0时）
  *====================================================================*/
 
-#include "dfs.h"
 #include "pattern.h"
 #include "cards.h"
 #include "score.h"

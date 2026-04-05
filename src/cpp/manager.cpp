@@ -30,6 +30,11 @@ HandResult tc_search_pattern(int position, const int* cards, int cnt)
     return search_pattern(position, cards, cnt);
 }
 
+int tc_dfs_find_best_pattern(const int hand13[13], DFSResult* out)
+{
+    return dfs_find_best_pattern(hand13, out);
+}
+
 tc_player_round_t tc_player_round_create(const char* name)
 {
     PlayerRound* p = new PlayerRound(name ? name : "Player");
