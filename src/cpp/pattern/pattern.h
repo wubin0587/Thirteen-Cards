@@ -116,6 +116,7 @@ typedef struct {
  * @param max_k   最多保留的组合数（建议 32~128，上限 128）。
  * @return 0 成功，非 0 错误码。
  */
+/* dfs.cpp 对外导出的 DFS 枚举入口 */
 int dfs_enum_combos(const int hand13[13], DFSCandResult* out, int max_k);
 
 /* --------------------------------------------------------------
