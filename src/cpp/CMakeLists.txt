@@ -8,6 +8,7 @@ add_library(thirteen_cards_cpp SHARED
     src/cpp/manager.cpp
     src/cpp/pattern/pattern.cpp
     src/cpp/pattern/searchPattern.cpp
+    # DFS 枚举实现（pattern/dfs.cpp）注册到共享库
     src/cpp/pattern/dfs.cpp
     src/cpp/players/player.cpp
     src/cpp/players/interaction.cpp

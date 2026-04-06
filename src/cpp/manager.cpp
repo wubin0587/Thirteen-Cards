@@ -30,9 +30,9 @@ HandResult tc_search_pattern(int position, const int* cards, int cnt)
     return search_pattern(position, cards, cnt);
 }
 
-int tc_dfs_find_best_pattern(const int hand13[13], DFSResult* out)
+int tc_dfs_enum_combos(const int hand13[13], DFSCandResult* out, int max_k)
 {
-    return dfs_find_best_pattern(hand13, out);
+    return dfs_enum_combos(hand13, out, max_k);
 }
 
 tc_player_round_t tc_player_round_create(const char* name)

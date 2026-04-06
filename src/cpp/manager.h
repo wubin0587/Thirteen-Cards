@@ -17,7 +17,7 @@ int tc_pattern_set_position(Pattern* p, int position, const int* cards, int coun
 int tc_pattern_get_position(const Pattern* p, int position, int* out_buf);
 int tc_pattern_sort(Pattern* p);
 HandResult tc_search_pattern(int position, const int* cards, int cnt);
-int tc_dfs_find_best_pattern(const int hand13[13], DFSResult* out);
+int tc_dfs_enum_combos(const int hand13[13], DFSCandResult* out, int max_k);
 
 /* -------------------- PlayerRound -------------------- */
 tc_player_round_t tc_player_round_create(const char* name);
