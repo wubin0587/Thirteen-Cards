@@ -16,118 +16,130 @@ extern "C" {
  * - head[3]    : 头墩（用户提交），未设置时内容未定义。
  * - middle[5]  : 中墩（用户提交），未设置时内容未定义。
  * - tail[5]    : 尾墩（用户提交），未设置时内容未定义。
- *
- * 结构体仅负责存储数据，不进行任何牌型判定。
  */
 typedef struct {
-    int hand[13];      /**< 原始 13 张手牌 */
-    int head[3];       /**< 头墩（3 张） */
-    int middle[5];     /**< 中墩（5 张） */
-    int tail[5];       /**< 尾墩（5 张） */
+    int hand[13];
+    int head[3];
+    int middle[5];
+    int tail[5];
 } Pattern;
 
 /* --------------------------------------------------------------
  * 2. 接口函数（C 风格，便于跨语言调用）
  * -------------------------------------------------------------- */
 
-/**
- * @brief 用完整手牌初始化 Pattern，仅复制 hand。
- *
- * @param hand13 长度为 13 的整型数组，存放牌号（0~103）。
- * @param out    指向已分配好的 Pattern 对象的指针。
- * @return 0 成功，非 0 为错误（如参数为空）。
- */
 int pattern_init(const int hand13[13], Pattern* out);
-
-/**
- * @brief 读取指定墩位的牌。
- *
- * @param p        已初始化的 Pattern 指针。
- * @param position 0=head, 1=middle, 2=tail。
- * @param out_buf  用于存放返回牌号的缓冲区（size >= 3/5）。
- * @return 0 成功，非 0 为错误（如 position 超出范围）。
- */
 int pattern_get_position(const Pattern* p, int position, int* out_buf);
-
-/**
- * @brief 设置指定墩位的牌（用户提交）。
- *
- * @param p        已初始化的 Pattern 指针。
- * @param position 同上（0=head,1=middle,2=tail）。
- * @param new_cards 指向新牌号数组的指针。
- * @param count    new_cards 元素数量（head 必须为 3，middle/tail 必须为 5）。
- * @return 0 成功，非 0 为错误。
- */
 int pattern_set_position(Pattern* p, int position,
-                        const int* new_cards, int count);
-
-/**
- * @brief 对 hand 以及已经设置好的每一墩位进行升序排序（按 id）。
- *
- * 只会对已写入的数组进行排序；若某墩位尚未写入（内容未定义），
- * 该函数仍会安全返回，不会对其进行排序。
- *
- * @param p 已初始化且可能已写入墩位的 Pattern 指针。
- * @return 0 成功，非 0 为错误（如 p 为 NULL）。
- */
+                         const int* new_cards, int count);
 int pattern_sort(Pattern* p);
 
+/* --------------------------------------------------------------
+ * 3. 牌型查询
+ * -------------------------------------------------------------- */
+
 /**
- * @brief 牌型查询结果（由 search_pattern 返回）。
+ * @brief 牌型查询结果。
  */
 typedef struct {
     int         position;   /**< 0=head,1=middle,2=tail,3=special */
-    const char* hand_name;  /**< 牌型名称，未命中时为 "Unknown" */
-    int         rank_order; /**< 牌型等级（越大越强） */
-    int         score;      /**< 对应水数 */
+    const char* hand_name;
+    int         rank_order; /**< 牌型等级，越大越强 */
+    int         score;      /**< 水数 */
 } HandResult;
 
-/**
- * @brief 根据墩位和牌组搜索牌型。
- *
- * @param position 0=head,1=middle,2=tail,3=special。
- * @param cards    牌号数组。
- * @param cnt      牌数（3/5/13）。
- * @return HandResult 牌型结果。
- */
 HandResult search_pattern(int position, const int* cards, int cnt);
 
+/* --------------------------------------------------------------
+ * 4. DFS 枚举结果结构
+ * -------------------------------------------------------------- */
 
 /**
- * @brief DFS 输出中的单个“有牌型墩”信息。
+ * @brief 单个"有牌型"组成单元。
+ *
+ *  position 字段**不在此处锁定**：
+ *    - card_count == 3  → 只能放头墩
+ *    - card_count == 5  → 可放中墩或尾墩，由上层模型决定
+ *
+ *  上层通过枚举排列（最多 3! = 6 种）配合不倒水约束选择最优分配。
  */
 typedef struct {
-    int        position;    /**< 0=head,1=middle,2=tail */
-    int        card_count;  /**< 3 或 5 */
-    int        cards[5];    /**< 实际牌号，头墩仅前 3 张有效 */
-    HandResult result;      /**< 该墩牌型结果 */
+    int        card_count;   /**< 3 或 5 */
+    int        cards[5];     /**< 实际牌号，头墩仅前 3 张有效 */
+    HandResult result;       /**< 该组牌的牌型结果（position 字段仅供参考） */
+} HandUnit;
+
+/**
+ * @brief 一种合法的牌型组合（不指定墩位）。
+ *
+ *  约束：
+ *    - units 中最多 1 个 card_count==3 的单元（头墩候选）
+ *    - units 中最多 2 个 card_count==5 的单元（中/尾候选）
+ *    - units 总数 1~3
+ *    - 存在至少一种墩位分配使得 tail >= middle >= head（不倒水）
+ *    - loose_cards 是剩余未锁入任何 unit 的散牌，按点数降序排列
+ *
+ *  typed_score：所有 unit 的 score 之和（不含散牌墩的评分）。
+ *  上层模型负责：
+ *    1. 枚举墩位分配排列，验证不倒水
+ *    2. 将 loose_cards 分配到空墩
+ *    3. 综合计算总期望分
+ */
+typedef struct {
+    int      unit_count;          /**< units 实际数量，1~3 */
+    HandUnit units[3];            /**< 有牌型的组成单元，不含散牌 */
+    int      typed_score;         /**< units 分数之和 */
+    int      loose_count;         /**< 散牌数量，0~10 */
+    int      loose_cards[13];     /**< 散牌，按点数降序（card_rank 降序） */
+} HandCombo;
+
+/**
+ * @brief dfs_enum_combos 的输出结构。
+ */
+typedef struct {
+    int       is_special;       /**< 1 = 命中特殊牌型，此时 combos 无意义 */
+    int       special_score;
+    const char* special_name;
+
+    int       combo_count;      /**< combos 实际数量 */
+    HandCombo combos[128];      /**< Top-K 组合，按 typed_score 降序 */
+} DFSCandResult;
+
+/**
+ * @brief 使用 DFS 枚举所有合法牌型组合。
+ *
+ *  输出 typed_score 最高的前 max_k 个不倒水可行的组合。
+ *  每个组合包含 1~3 个"有牌型单元" + 剩余散牌，不指定墩位。
+ *
+ * @param hand13  13 张手牌。
+ * @param out     输出结构体，由调用方分配。
+ * @param max_k   最多保留的组合数（建议 32~128，上限 128）。
+ * @return 0 成功，非 0 错误码。
+ */
+int dfs_enum_combos(const int hand13[13], DFSCandResult* out, int max_k);
+
+/* --------------------------------------------------------------
+ * 5. 兼容旧接口（保留类型定义，供其他模块过渡期使用）
+ * -------------------------------------------------------------- */
+
+typedef struct {
+    int        position;
+    int        card_count;
+    int        cards[5];
+    HandResult result;
 } TypedPileResult;
 
-/**
- * @brief DFS 自动分墩结果。
- */
 typedef struct {
-    int               is_special;          /**< 1=命中特殊牌型 */
-    int               special_score;       /**< 特殊牌型分数 */
-    const char*       special_name;        /**< 特殊牌型名称 */
-
-    int               typed_score;         /**< 有牌型墩总分 */
-    int               typed_count;         /**< typed_piles 实际数量，0~3 */
-    TypedPileResult   typed_piles[3];      /**< 有牌型墩列表 */
-
-    int               occupied_positions;  /**< bit0=head, bit1=middle, bit2=tail */
-    int               loose_count;         /**< loose_cards 实际数量，0~13 */
-    int               loose_cards[13];     /**< 未锁定到有牌型墩的散牌 */
+    int             is_special;
+    int             special_score;
+    const char*     special_name;
+    int             typed_score;
+    int             typed_count;
+    TypedPileResult typed_piles[3];
+    int             occupied_positions;
+    int             loose_count;
+    int             loose_cards[13];
 } DFSResult;
-
-/**
- * @brief 使用 DFS 搜索“有牌型墩分数最大化”的最优方案。
- *
- * @param hand13 13 张手牌（牌号数组）。
- * @param out    DFS 输出结构。
- * @return 0 成功，非 0 为错误码。
- */
-int dfs_find_best_pattern(const int hand13[13], DFSResult* out);
 
 #ifdef __cplusplus
 }
