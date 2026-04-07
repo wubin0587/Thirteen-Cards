@@ -69,6 +69,7 @@ private:
     Pattern* m_pat;        // 由 pattern_init / pattern_destroy 管理
     int            m_roundScore; // 本局得分，-1 表示未结算
     bool           m_isSpecial;  // true 表示已经是特殊 13 张牌型
+    HandResult     m_specialResult; // 特殊牌型缓存（非特殊时为 Unknown）
 
 public:
     explicit PlayerRound(const char* name = "RoundPlayer");
@@ -91,6 +92,10 @@ public:
 
     /* 读取本局得分（结算后才有意义） --------------------------- */
     int getRoundScore() const;
+    bool isSpecialHand() const;
+    HandResult getSpecialResult() const;
+    int getPositionResult(int position, HandResult* out) const;
+    int getPositionCards(int position, int* out_cards5) const;
     void resetRound();
 };
 
