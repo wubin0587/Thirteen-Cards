@@ -2,8 +2,19 @@
 
 #include "players/player.h"
 #include "round/round.h"
+#include "cards/cards.h"
 
 #include <stdlib.h>
+
+int tc_card_rank(int card_id)
+{
+    return card_rank(card_id);
+}
+
+int tc_card_suit(int card_id)
+{
+    return card_suit(card_id % CARD_DECK2_BASE);
+}
 
 int tc_pattern_init(const int hand13[13], Pattern* out)
 {
