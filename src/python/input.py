@@ -16,7 +16,7 @@ C++ 共享库的 ctypes 绑定层。
   py_dfs_enum_combos(hand13, max_k)  → DFSCandResultPy
   card_rank(card_id)                 → int  (0=2 … 12=A)
   card_suit(card_id)                 → int  (0=D 1=C 2=H 3=S)
-  card_name(card_id)                 → str  e.g. "AH"
+  card_name(card_id)                 → str  e.g. "HA" / "D2"
 """
 
 import ctypes
@@ -399,7 +399,9 @@ def card_suit(card_id: int) -> int:
 
 def card_name(card_id: int, zh: bool = False) -> str:
     """
-    返回牌的可读名称，如 "AH"（英文）或 "♥A"（中文符号）。
+    返回牌的可读名称，如 "HA"（英文）或 "♥A"（中文符号）。
+
+    英文格式与 C++ cards 枚举名称保持一致：花色在前、点数在后（如 D2/HJ/SA）。
 
     多副牌的第二副从 52 开始，名称与第一副相同。
     """
@@ -407,7 +409,7 @@ def card_name(card_id: int, zh: bool = False) -> str:
     s = card_suit(card_id)
     if zh:
         return f"{_SUIT_CHARS_ZH[s]}{_RANK_NAMES[r]}"
-    return f"{_RANK_NAMES[r]}{_SUIT_NAMES[s]}"
+    return f"{_SUIT_NAMES[s]}{_RANK_NAMES[r]}"
 
 
 def hand_to_names(hand: List[int], zh: bool = False) -> List[str]:
