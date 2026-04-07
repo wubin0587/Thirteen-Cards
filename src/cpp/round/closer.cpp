@@ -162,6 +162,40 @@ static int compare_same_rank_by_cards(int position, const int* ca, const int* cb
     return compare_five_cards(ca, cb);
 }
 
+static int compare_position(PlayerRound* a, PlayerRound* b, int pos)
+{
+    HandResult ha = {0, "Unknown", 0, 0};
+    HandResult hb = {0, "Unknown", 0, 0};
+    if (a->getPositionResult(pos, &ha) != 0) return 0;
+    if (b->getPositionResult(pos, &hb) != 0) return 0;
+
+    int cmp = compare_hand_result(ha, hb);
+    if (cmp != 0) return cmp;
+
+    int ca[5] = {0, 0, 0, 0, 0};
+    int cb[5] = {0, 0, 0, 0, 0};
+    if (a->getPositionCards(pos, ca) != 0) return 0;
+    if (b->getPositionCards(pos, cb) != 0) return 0;
+    return compare_same_rank_by_cards(pos, ca, cb);
+}
+
+static bool is_player_fouled(PlayerRound* p)
+{
+    if (!p) return false;
+    if (p->isSpecialHand()) return false; // 特殊牌型不判倒水
+
+    // 不倒水要求：尾 >= 中 >= 头
+    HandResult h = {0, "Unknown", 0, 0};
+    HandResult m = {0, "Unknown", 0, 0};
+    HandResult t = {0, "Unknown", 0, 0};
+    if (p->getPositionResult(0, &h) != 0) return true;
+    if (p->getPositionResult(1, &m) != 0) return true;
+    if (p->getPositionResult(2, &t) != 0) return true;
+
+    return (compare_hand_result(t, m) < 0 ||
+            compare_hand_result(m, h) < 0);
+}
+
 static PairSettleResult settle_pair(PlayerRound* a, PlayerRound* b)
 {
     PairSettleResult r = {0, 0, false, false};
@@ -198,15 +232,7 @@ static PairSettleResult settle_pair(PlayerRound* a, PlayerRound* b)
         if (a->getPositionResult(pos, &ha) != 0) continue;
         if (b->getPositionResult(pos, &hb) != 0) continue;
 
-        int cmp = compare_hand_result(ha, hb);
-        if (cmp == 0) {
-            int ca[5] = {0, 0, 0, 0, 0};
-            int cb[5] = {0, 0, 0, 0, 0};
-            if (a->getPositionCards(pos, ca) == 0 &&
-                b->getPositionCards(pos, cb) == 0) {
-                cmp = compare_same_rank_by_cards(pos, ca, cb);
-            }
-        }
+        int cmp = compare_position(a, b, pos);
         if (cmp > 0) {
             score_sum += ha.score;
             ++win_a;
@@ -257,10 +283,12 @@ int round_close(Round* r) {
     int* round_scores = (int*)malloc(sizeof(int) * n);
     int* net_scores = (int*)malloc(sizeof(int) * n);
     int* beat_cnt = (int*)malloc(sizeof(int) * n); // 用于判断全垒打
-    if (!round_scores || !net_scores || !beat_cnt) {
+    bool* fouled = (bool*)malloc(sizeof(bool) * n);
+    if (!round_scores || !net_scores || !beat_cnt || !fouled) {
         if (round_scores) free(round_scores);
         if (net_scores) free(net_scores);
         if (beat_cnt) free(beat_cnt);
+        if (fouled) free(fouled);
         return -4;
     }
 
@@ -270,10 +298,12 @@ int round_close(Round* r) {
         beat_cnt[i] = 0;
         if (!pr) {
             round_scores[i] = 0;
+            fouled[i] = false;
             continue;
         }
         int rc = pr->settle();
         round_scores[i] = (rc < 0) ? 0 : rc;
+        fouled[i] = is_player_fouled(pr);
     }
 
     // -------------------------------------------------
@@ -285,12 +315,14 @@ int round_close(Round* r) {
         free(round_scores);
         free(net_scores);
         free(beat_cnt);
+        free(fouled);
         return -4;
     }
     for (int i = 0; i < n * n; ++i) pair_results[i] = {0, 0, false, false};
 
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
+            if (fouled[i] || fouled[j]) continue; // 倒水玩家不参与两两结算
             PairSettleResult pr = settle_pair(r->players[i], r->players[j]);
             pair_results[i * n + j] = pr;
             if (pr.winner == 1) ++beat_cnt[i];
@@ -307,10 +339,20 @@ int round_close(Round* r) {
         free(round_scores);
         free(net_scores);
         free(beat_cnt);
+        free(fouled);
         return -4;
     }
     for (int i = 0; i < n; ++i) {
-        homerun[i] = (beat_cnt[i] == n - 1);
+        if (fouled[i]) {
+            homerun[i] = false;
+            continue;
+        }
+        int opponents = 0;
+        for (int j = 0; j < n; ++j) {
+            if (j == i || fouled[j]) continue;
+            ++opponents;
+        }
+        homerun[i] = (opponents > 0 && beat_cnt[i] == opponents);
     }
 
     // -------------------------------------------------
@@ -318,6 +360,7 @@ int round_close(Round* r) {
     // -------------------------------------------------
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
+            if (fouled[i] || fouled[j]) continue;
             PairSettleResult pr = pair_results[i * n + j];
             if (pr.winner == 0 || pr.base_score <= 0) continue;
 
@@ -341,11 +384,38 @@ int round_close(Round* r) {
     }
 
     // -------------------------------------------------
-    // 5) 输出全局结算与成就提示
+    // 5) 倒水买单：所有负分玩家由倒水玩家买单（多人倒水则平分）
+    // -------------------------------------------------
+    int foul_cnt = 0;
+    for (int i = 0; i < n; ++i) if (fouled[i]) ++foul_cnt;
+    if (foul_cnt > 0) {
+        int total_bill = 0;
+        for (int i = 0; i < n; ++i) {
+            if (fouled[i]) continue;
+            if (net_scores[i] < 0) {
+                total_bill += -net_scores[i];
+                net_scores[i] = 0; // 负分由倒水玩家承担
+            }
+        }
+        int each = (foul_cnt > 0) ? (total_bill / foul_cnt) : 0;
+        int rem  = (foul_cnt > 0) ? (total_bill % foul_cnt) : 0;
+        for (int i = 0; i < n; ++i) {
+            if (!fouled[i]) continue;
+            int extra = (rem > 0) ? 1 : 0;
+            if (rem > 0) --rem;
+            net_scores[i] -= (each + extra);
+        }
+    }
+
+    // -------------------------------------------------
+    // 6) 输出全局结算与成就提示
     // -------------------------------------------------
     for (int i = 0; i < n; ++i) {
         PlayerRound* pr = r->players[i];
         if (!pr) continue;
+        if (fouled[i]) {
+            std::printf("[FOUL] %s 倒水：不参与两两结算，承担买单\n", pr->getName());
+        }
         if (homerun[i]) {
             std::printf("[ACHV] %s achieved 全垒打 (x3, no shoot bonus)\n",
                         pr->getName());
@@ -360,7 +430,7 @@ int round_close(Round* r) {
     }
 
     // -------------------------------------------------
-    // 6) 清理每位玩家的局状态
+    // 7) 清理每位玩家的局状态
     // -------------------------------------------------
     for (int i = 0; i < n; ++i) {
         PlayerRound* pr = r->players[i];
@@ -370,7 +440,7 @@ int round_close(Round* r) {
     }
 
     // -------------------------------------------------
-    // 7) 释放本局牌堆并复位 Round
+    // 8) 释放本局牌堆并复位 Round
     // -------------------------------------------------
     if (r->deck) {
         free(r->deck);
@@ -384,5 +454,6 @@ int round_close(Round* r) {
     free(round_scores);
     free(net_scores);
     free(beat_cnt);
+    free(fouled);
     return 0;   // 成功
 }
