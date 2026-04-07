@@ -46,6 +46,7 @@ def _default_lib_path() -> str:
 
 
 _lib: Optional[ctypes.CDLL] = None  # 全局单例
+_use_tc_card_utils = False
 
 
 def load_lib(path: Optional[str] = None) -> ctypes.CDLL:
@@ -131,22 +132,53 @@ class _DFSCandResult(ctypes.Structure):
 
 def _declare_signatures(lib: ctypes.CDLL) -> None:
     """为所有导出函数设置 argtypes / restype，防止未定义行为。"""
+    global _use_tc_card_utils
 
-    # HandResult search_pattern(int position, const int* cards, int cnt)
-    lib.search_pattern.argtypes = [
+    # HandResult tc_search_pattern(int position, const int* cards, int cnt)
+    lib.tc_search_pattern.argtypes = [
         ctypes.c_int,
         ctypes.POINTER(ctypes.c_int),
         ctypes.c_int,
     ]
-    lib.search_pattern.restype = _HandResult
+    lib.tc_search_pattern.restype = _HandResult
 
-    # int dfs_enum_combos(const int hand13[13], DFSCandResult* out, int max_k)
-    lib.dfs_enum_combos.argtypes = [
+    # int tc_dfs_enum_combos(const int hand13[13], DFSCandResult* out, int max_k)
+    lib.tc_dfs_enum_combos.argtypes = [
         ctypes.POINTER(ctypes.c_int),
         ctypes.POINTER(_DFSCandResult),
         ctypes.c_int,
     ]
-    lib.dfs_enum_combos.restype = ctypes.c_int
+    lib.tc_dfs_enum_combos.restype = ctypes.c_int
+
+    # tc_player_round_t tc_player_round_create(const char* name)
+    lib.tc_player_round_create.argtypes = [ctypes.c_char_p]
+    lib.tc_player_round_create.restype = ctypes.c_void_p
+    lib.tc_player_round_destroy.argtypes = [ctypes.c_void_p]
+    lib.tc_player_round_destroy.restype = None
+    lib.tc_player_round_receive_hand.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_int)]
+    lib.tc_player_round_receive_hand.restype = ctypes.c_int
+    lib.tc_player_round_set_position.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_int), ctypes.c_int
+    ]
+    lib.tc_player_round_set_position.restype = ctypes.c_int
+    lib.tc_player_round_settle.argtypes = [ctypes.c_void_p]
+    lib.tc_player_round_settle.restype = ctypes.c_int
+    lib.tc_player_round_get_round_score.argtypes = [ctypes.c_void_p]
+    lib.tc_player_round_get_round_score.restype = ctypes.c_int
+
+    # round helpers
+    lib.tc_round_close_players.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_int]
+    lib.tc_round_close_players.restype = ctypes.c_int
+
+    # card utils（老库可能未导出，做兼容）
+    try:
+        lib.tc_card_rank.argtypes = [ctypes.c_int]
+        lib.tc_card_rank.restype = ctypes.c_int
+        lib.tc_card_suit.argtypes = [ctypes.c_int]
+        lib.tc_card_suit.restype = ctypes.c_int
+        _use_tc_card_utils = True
+    except AttributeError:
+        _use_tc_card_utils = False
 
     # int tc_pattern_init(const int hand13[13], Pattern* out)
     # Pattern 结构体仅供外部使用，这里不封装，仅声明最小接口
@@ -258,7 +290,7 @@ def py_search_pattern(position: int, cards: List[int]) -> HandResultPy:
     """
     lib = get_lib()
     arr = (ctypes.c_int * len(cards))(*cards)
-    raw = lib.search_pattern(position, arr, len(cards))
+    raw = lib.tc_search_pattern(position, arr, len(cards))
     return _conv_hand_result(raw)
 
 
@@ -287,10 +319,47 @@ def py_dfs_enum_combos(
     lib = get_lib()
     arr = (ctypes.c_int * 13)(*hand13)
     out = _DFSCandResult()
-    rc = lib.dfs_enum_combos(arr, ctypes.byref(out), max_k)
+    rc = lib.tc_dfs_enum_combos(arr, ctypes.byref(out), max_k)
     if rc != 0:
         raise RuntimeError(f"dfs_enum_combos 返回错误码 {rc}")
     return _conv_dfs_result(out)
+
+
+def py_player_round_score(
+    hand13: List[int],
+    head_cards: List[int],
+    middle_cards: List[int],
+    tail_cards: List[int],
+) -> int:
+    """使用 C++ PlayerRound 接口计算一手牌的结算分。"""
+    if len(hand13) != 13:
+        raise ValueError(f"hand13 必须恰好 13 张，实际收到 {len(hand13)} 张")
+    if len(head_cards) != 3 or len(middle_cards) != 5 or len(tail_cards) != 5:
+        raise ValueError("三墩牌数必须为 3/5/5")
+
+    lib = get_lib()
+    player = lib.tc_player_round_create(b"py_eval")
+    if not player:
+        raise RuntimeError("tc_player_round_create 失败")
+
+    try:
+        hand_arr = (ctypes.c_int * 13)(*hand13)
+        rc = lib.tc_player_round_receive_hand(player, hand_arr)
+        if rc != 0:
+            raise RuntimeError(f"tc_player_round_receive_hand 返回错误码 {rc}")
+
+        for pos, cards in ((0, head_cards), (1, middle_cards), (2, tail_cards)):
+            arr = (ctypes.c_int * len(cards))(*cards)
+            rc = lib.tc_player_round_set_position(player, pos, arr, len(cards))
+            if rc != 0:
+                raise RuntimeError(f"tc_player_round_set_position(pos={pos}) 返回错误码 {rc}")
+
+        rc = lib.tc_player_round_settle(player)
+        if rc < 0:
+            raise RuntimeError(f"tc_player_round_settle 返回错误码 {rc}")
+        return rc
+    finally:
+        lib.tc_player_round_destroy(player)
 
 
 # ============================================================
@@ -304,11 +373,27 @@ _SUIT_CHARS_ZH = ["♦", "♣", "♥", "♠"]
 
 def card_rank(card_id: int) -> int:
     """返回牌的点数索引 0=2 … 12=A（多副牌自动取模）。"""
+    lib = _lib
+    if lib is None:
+        try:
+            lib = get_lib()
+        except Exception:
+            lib = None
+    if lib is not None and _use_tc_card_utils:
+        return int(lib.tc_card_rank(card_id))
     return card_id % 13
 
 
 def card_suit(card_id: int) -> int:
     """返回牌的花色索引 0=D 1=C 2=H 3=S（多副牌自动处理）。"""
+    lib = _lib
+    if lib is None:
+        try:
+            lib = get_lib()
+        except Exception:
+            lib = None
+    if lib is not None and _use_tc_card_utils:
+        return int(lib.tc_card_suit(card_id))
     return (card_id % 52) // 13
 
 

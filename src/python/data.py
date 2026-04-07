@@ -36,6 +36,7 @@ from torch.utils.data import Dataset, DataLoader
 from input import (
     py_dfs_enum_combos,
     py_search_pattern,
+    py_player_round_score,
     DFSCandResultPy,
     HandComboPy,
     card_rank,
@@ -123,26 +124,11 @@ def _score_against_opponent(
       - 三墩各赢得 1 分；赢 2 墩以上额外获得 1 分（打枪）
       - 被对手全赢（0:3）额外罚 1 分（被打枪）
     """
-    my_scores  = [py_search_pattern(i, cards) for i, cards in
-                  enumerate([my_head, my_mid, my_tail])]
-    op_scores  = [py_search_pattern(i, cards) for i, cards in
-                  enumerate([op_head, op_mid, op_tail])]
-
-    wins = 0
-    for ms, os_ in zip(my_scores, op_scores):
-        if ms.rank_order > os_.rank_order:
-            wins += 1
-        elif ms.rank_order == os_.rank_order:
-            # 同牌型比较：用水数作为 tiebreak（粗略）
-            if ms.score >= os_.score:
-                wins += 1
-
-    if wins >= 2:
-        return wins + 1     # 打枪奖励
-    elif wins == 0:
-        return -(3 + 1)     # 被打枪惩罚
-    else:
-        return wins - (3 - wins)  # wins - losses
+    my_hand = list(my_head) + list(my_mid) + list(my_tail)
+    op_hand = list(op_head) + list(op_mid) + list(op_tail)
+    my_total = py_player_round_score(my_hand, my_head, my_mid, my_tail)
+    op_total = py_player_round_score(op_hand, op_head, op_mid, op_tail)
+    return my_total - op_total
 
 
 def _monte_carlo_score(

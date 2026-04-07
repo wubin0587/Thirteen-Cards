@@ -11,6 +11,10 @@ extern "C" {
 typedef void* tc_player_round_t;
 typedef void* tc_hand_manager_t;
 
+/* -------------------- Cards utils -------------------- */
+int tc_card_rank(int card_id);
+int tc_card_suit(int card_id);
+
 /* -------------------- Pattern -------------------- */
 int tc_pattern_init(const int hand13[13], Pattern* out);
 int tc_pattern_set_position(Pattern* p, int position, const int* cards, int count);
