@@ -1,29 +1,13 @@
 """
-models.py
----------
-模型定义层。
+models.py  (RL版本)
+-------------------
+在原 TransformerRanker 基础上增加：
+  - ValueHead：输出标量状态价值 V(s)，供 PPO critic 使用
+  - ActorCritic：统一 forward，同时输出 logits(actor) 和 value(critic)
+  - inference()：保持兼容，用于推理阶段（不需要 value）
 
-职责：
-  - 定义 ModelConfig 超参数数据类
-  - 定义 TransformerRanker 网络结构
-  - 提供 inference() 推理接口（接受特征张量，返回 logits）
-  - 不做任何 IO（存取文件由 train.py 负责）
-
-网络结构概述：
-  手牌分支：
-    Linear(CARD_DIM→d_model) → Transformer Encoder(L层) → mean pooling → hand_emb
-
-  Combo分支（每个候选独立编码）：
-    Linear(COMBO_DIM→d_model) → combo_emb
-
-  交叉注意力打分：
-    CrossAttention(query=combo_emb, key/value=hand_emb) → scoring_head → logit
-
-  最终输出：
-    shape (batch, MAX_COMBOS)  ← 每个候选的原始 logit（未归一化）
-
-参数量估算（默认配置）：
-  d_model=64, n_heads=4, n_layers=2 → ~115K 参数 → ~0.5MB ONNX
+原有 TransformerRanker 保持不变，ActorCritic 继承并扩展。
+ONNX 导出仍只导出 actor 部分（TransformerRanker），Unity 端无感知。
 """
 
 from __future__ import annotations
@@ -39,86 +23,74 @@ from features import CARD_DIM, COMBO_DIM, MAX_COMBOS
 
 
 # ============================================================
-# 1.  超参数配置
+# 1.  超参数配置（扩展 RL 参数）
 # ============================================================
 
 @dataclass
 class ModelConfig:
-    # 网络维度
-    d_model:     int = 64     # Transformer 隐藏维度
-    n_heads:     int = 4      # 多头注意力头数
-    n_layers:    int = 2      # Transformer Encoder 层数
-    d_ffn:       int = 128    # FFN 中间维度（通常 = 2×d_model）
+    d_model:     int = 64
+    n_heads:     int = 4
+    n_layers:    int = 2
+    d_ffn:       int = 128
     dropout:     float = 0.1
 
-    # 输入维度（与 features.py 保持一致，勿修改）
-    card_dim:    int = CARD_DIM    # 17
-    combo_dim:   int = COMBO_DIM   # 74
-    max_combos:  int = MAX_COMBOS  # 128
+    card_dim:    int = CARD_DIM
+    combo_dim:   int = COMBO_DIM
+    max_combos:  int = MAX_COMBOS
 
-    # 训练相关（仅供 train.py 读取）
+    # 监督学习参数（保留兼容）
     lr:          float = 3e-4
     weight_decay: float = 1e-4
     batch_size:  int = 256
 
+    # RL 参数
+    lr_actor:    float = 3e-4
+    lr_critic:   float = 1e-3
+    clip_eps:    float = 0.2      # PPO clip
+    entropy_coef: float = 0.01   # 熵正则，防止策略过早收敛
+    value_coef:  float = 0.5     # critic loss 权重
+    gae_lambda:  float = 0.95    # GAE λ
+    gamma:       float = 0.99    # 折扣因子（单步博弈设为1.0更合适）
+    ppo_epochs:  int = 4         # 每批数据的 PPO 更新轮数
+    minibatch_size: int = 64
+
 
 # ============================================================
-# 2.  位置编码（可学习，适合短序列）
+# 2.  位置编码
 # ============================================================
 
 class LearnedPositionalEncoding(nn.Module):
-    """13个位置的可学习位置编码。"""
-
     def __init__(self, seq_len: int, d_model: int):
         super().__init__()
         self.pe = nn.Embedding(seq_len, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (batch, seq, d_model)
-        seq = x.size(1)
-        pos = torch.arange(seq, device=x.device)
+        pos = torch.arange(x.size(1), device=x.device)
         return x + self.pe(pos).unsqueeze(0)
 
 
 # ============================================================
-# 3.  手牌 Transformer Encoder
+# 3.  手牌编码器
 # ============================================================
 
 class HandEncoder(nn.Module):
-    """
-    将 13 张手牌的 token 序列编码为固定维度的上下文向量。
-
-    输入：(batch, 13, CARD_DIM)
-    输出：(batch, d_model)  ← mean pooling
-    """
-
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         self.proj = nn.Linear(cfg.card_dim, cfg.d_model)
         self.pos_enc = LearnedPositionalEncoding(13, cfg.d_model)
-
         encoder_layer = nn.TransformerEncoderLayer(
-            d_model=cfg.d_model,
-            nhead=cfg.n_heads,
-            dim_feedforward=cfg.d_ffn,
-            dropout=cfg.dropout,
-            batch_first=True,
-            norm_first=True,   # Pre-LN 更稳定
+            d_model=cfg.d_model, nhead=cfg.n_heads,
+            dim_feedforward=cfg.d_ffn, dropout=cfg.dropout,
+            batch_first=True, norm_first=True,
         )
-        self.encoder = nn.TransformerEncoder(
-            encoder_layer,
-            num_layers=cfg.n_layers,
-        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=cfg.n_layers)
         self.norm = nn.LayerNorm(cfg.d_model)
 
     def forward(self, hand_tokens: torch.Tensor) -> torch.Tensor:
-        # hand_tokens: (B, 13, CARD_DIM)
-        x = self.proj(hand_tokens)       # (B, 13, d_model)
+        x = self.proj(hand_tokens)
         x = self.pos_enc(x)
-        x = self.encoder(x)              # (B, 13, d_model)
-        x = self.norm(x)
-        hand_emb = x.mean(dim=1)         # (B, d_model) — mean pooling
-        return hand_emb
+        x = self.encoder(x)
+        return self.norm(x).mean(dim=1)
 
 
 # ============================================================
@@ -126,13 +98,6 @@ class HandEncoder(nn.Module):
 # ============================================================
 
 class ComboEncoder(nn.Module):
-    """
-    将每个候选 combo 的特征向量映射到 d_model 维。
-
-    输入：(batch, K, COMBO_DIM)
-    输出：(batch, K, d_model)
-    """
-
     def __init__(self, cfg: ModelConfig):
         super().__init__()
         self.net = nn.Sequential(
@@ -144,183 +109,190 @@ class ComboEncoder(nn.Module):
         )
 
     def forward(self, combo_features: torch.Tensor) -> torch.Tensor:
-        # combo_features: (B, K, COMBO_DIM)
-        return self.net(combo_features)  # (B, K, d_model)
+        return self.net(combo_features)
 
 
 # ============================================================
-# 5.  交叉注意力打分头
+# 5.  交叉注意力打分头（Actor）
 # ============================================================
 
 class CrossAttentionScorer(nn.Module):
-    """
-    用手牌上下文向量对每个 combo 进行打分。
-
-    手牌 emb 作为 query，combo emb 作为 key/value，
-    输出每个 combo 的标量 logit。
-
-    输入：
-      hand_emb:   (B, d_model)
-      combo_emb:  (B, K, d_model)
-    输出：
-      logits:     (B, K)
-    """
-
     def __init__(self, cfg: ModelConfig):
         super().__init__()
-        self.d_model = cfg.d_model
-        self.q_proj = nn.Linear(cfg.d_model, cfg.d_model)
-        self.k_proj = nn.Linear(cfg.d_model, cfg.d_model)
-        self.v_proj = nn.Linear(cfg.d_model, cfg.d_model)
-        self.out_proj = nn.Linear(cfg.d_model, 1)
         self.scale = math.sqrt(cfg.d_model)
+        self.q_proj  = nn.Linear(cfg.d_model, cfg.d_model)
+        self.k_proj  = nn.Linear(cfg.d_model, cfg.d_model)
+        self.v_proj  = nn.Linear(cfg.d_model, cfg.d_model)
+        self.out_proj = nn.Linear(cfg.d_model, 1)
 
     def forward(
         self,
-        hand_emb: torch.Tensor,    # (B, d_model)
-        combo_emb: torch.Tensor,   # (B, K, d_model)
-        combo_mask: torch.Tensor,  # (B, K)  float32, 1=valid 0=padding
+        hand_emb:   torch.Tensor,
+        combo_emb:  torch.Tensor,
+        combo_mask: torch.Tensor,
     ) -> torch.Tensor:
-        # query: (B, 1, d_model)
         q = self.q_proj(hand_emb).unsqueeze(1)
-        # key/value: (B, K, d_model)
         k = self.k_proj(combo_emb)
         v = self.v_proj(combo_emb)
-
-        # Attention weights: (B, 1, K)
         attn = torch.bmm(q, k.transpose(1, 2)) / self.scale
-
-        # Mask padding combos（置为极大负数）
-        mask_expanded = (1.0 - combo_mask).unsqueeze(1) * -1e9  # (B,1,K)
-        attn = attn + mask_expanded
-        attn = torch.softmax(attn, dim=-1)  # (B, 1, K)
-
-        # Context: (B, 1, d_model) → (B, d_model)
+        mask_expanded = (1.0 - combo_mask).unsqueeze(1) * -1e9
+        attn = torch.softmax(attn + mask_expanded, dim=-1)
         context = torch.bmm(attn, v).squeeze(1)
-
-        # 将 context 与每个 combo_emb 相加后打分
-        # combo_emb: (B, K, d_model)，context 广播
-        combined = combo_emb + context.unsqueeze(1)  # (B, K, d_model)
-        logits = self.out_proj(combined).squeeze(-1)  # (B, K)
-
-        # padding 位置归零（防止采样时被选中）
+        combined = combo_emb + context.unsqueeze(1)
+        logits = self.out_proj(combined).squeeze(-1)
         logits = logits * combo_mask + (combo_mask - 1.0) * 1e9
-
-        return logits  # (B, K)
+        return logits
 
 
 # ============================================================
-# 6.  完整模型：TransformerRanker
+# 6.  价值头（Critic）
+# ============================================================
+
+class ValueHead(nn.Module):
+    """
+    将手牌嵌入 → 标量状态价值。
+    输入：hand_emb (B, d_model)
+    输出：value   (B,)
+    """
+    def __init__(self, cfg: ModelConfig):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(cfg.d_model, cfg.d_model),
+            nn.GELU(),
+            nn.Linear(cfg.d_model, 1),
+        )
+
+    def forward(self, hand_emb: torch.Tensor) -> torch.Tensor:
+        return self.net(hand_emb).squeeze(-1)
+
+
+# ============================================================
+# 7.  TransformerRanker（Actor-only，兼容 ONNX 导出）
 # ============================================================
 
 class TransformerRanker(nn.Module):
     """
-    福建十三水理牌 AI 核心模型。
-
-    功能：对 DFS 枚举的 K 个候选 combo 进行排序打分，
-    配合温度采样和 aggression 调整选出最终方案。
-
-    输入（均为 float32 张量）：
-      hand_tokens:    (B, 13, CARD_DIM)
-      combo_features: (B, K, COMBO_DIM)
-      combo_mask:     (B, K)
-
-    输出：
-      logits: (B, K)  —— 原始得分，越高越倾向于选该 combo
+    纯 Actor，输出各 combo 的 logit。
+    ONNX 导出此类，Unity Sentis 使用。
     """
-
     def __init__(self, cfg: ModelConfig = ModelConfig()):
         super().__init__()
         self.cfg = cfg
-        self.hand_encoder   = HandEncoder(cfg)
-        self.combo_encoder  = ComboEncoder(cfg)
-        self.scorer         = CrossAttentionScorer(cfg)
+        self.hand_encoder  = HandEncoder(cfg)
+        self.combo_encoder = ComboEncoder(cfg)
+        self.scorer        = CrossAttentionScorer(cfg)
 
     def forward(
         self,
-        hand_tokens:    torch.Tensor,   # (B, 13, CARD_DIM)
-        combo_features: torch.Tensor,   # (B, K, COMBO_DIM)
-        combo_mask:     torch.Tensor,   # (B, K)
+        hand_tokens:    torch.Tensor,
+        combo_features: torch.Tensor,
+        combo_mask:     torch.Tensor,
     ) -> torch.Tensor:
-        hand_emb  = self.hand_encoder(hand_tokens)         # (B, d_model)
-        combo_emb = self.combo_encoder(combo_features)     # (B, K, d_model)
-        logits    = self.scorer(hand_emb, combo_emb, combo_mask)  # (B, K)
-        return logits
+        hand_emb  = self.hand_encoder(hand_tokens)
+        combo_emb = self.combo_encoder(combo_features)
+        return self.scorer(hand_emb, combo_emb, combo_mask)
 
     def count_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
 # ============================================================
-# 7.  推理接口（含 temperature + aggression 调整）
+# 8.  ActorCritic（RL 训练使用）
+# ============================================================
+
+class ActorCritic(nn.Module):
+    """
+    Actor-Critic 统一模型，用于 PPO 训练。
+
+    Actor 部分 = TransformerRanker（可直接导出 ONNX）
+    Critic 部分 = ValueHead（仅训练时使用，不导出）
+
+    参数共享：所有 n_players 个 agent 共用同一个 ActorCritic 实例。
+    这等价于 MAPPO 的 centralized critic 简化版（此处 critic 仍只看自己手牌）。
+    """
+    def __init__(self, cfg: ModelConfig = ModelConfig()):
+        super().__init__()
+        self.cfg = cfg
+        self.hand_encoder  = HandEncoder(cfg)
+        self.combo_encoder = ComboEncoder(cfg)
+        self.scorer        = CrossAttentionScorer(cfg)
+        self.value_head    = ValueHead(cfg)
+
+    def forward(
+        self,
+        hand_tokens:    torch.Tensor,   # (B, 13, CARD_DIM)
+        combo_features: torch.Tensor,   # (B, K, COMBO_DIM)
+        combo_mask:     torch.Tensor,   # (B, K)
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        返回 (logits, value)
+          logits : (B, K)  actor 输出
+          value  : (B,)    critic 输出
+        """
+        hand_emb  = self.hand_encoder(hand_tokens)
+        combo_emb = self.combo_encoder(combo_features)
+        logits    = self.scorer(hand_emb, combo_emb, combo_mask)
+        value     = self.value_head(hand_emb)
+        return logits, value
+
+    def get_actor(self) -> TransformerRanker:
+        """提取 actor 部分，用于 ONNX 导出。"""
+        ranker = TransformerRanker(self.cfg)
+        ranker.hand_encoder.load_state_dict(self.hand_encoder.state_dict())
+        ranker.combo_encoder.load_state_dict(self.combo_encoder.state_dict())
+        ranker.scorer.load_state_dict(self.scorer.state_dict())
+        return ranker
+
+    def count_parameters(self) -> int:
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+# ============================================================
+# 9.  推理接口（兼容原 individual.py）
 # ============================================================
 
 def inference(
     model:          TransformerRanker,
-    hand_tokens:    torch.Tensor,   # (1, 13, CARD_DIM)
-    combo_features: torch.Tensor,   # (1, K, COMBO_DIM)
-    combo_mask:     torch.Tensor,   # (1, K)
+    hand_tokens:    torch.Tensor,
+    combo_features: torch.Tensor,
+    combo_mask:     torch.Tensor,
     temperature:    float = 1.0,
     aggression:     float = 0.0,
-    attack_potentials:   torch.Tensor | None = None,  # (1, K)
-    defense_stabilities: torch.Tensor | None = None,  # (1, K)
+    attack_potentials:   torch.Tensor | None = None,
+    defense_stabilities: torch.Tensor | None = None,
     deterministic:  bool = False,
 ) -> int:
-    """
-    执行单次推理，返回选中的 combo 索引。
-
-    Parameters
-    ----------
-    model            : 已加载的 TransformerRanker
-    hand_tokens      : 手牌特征张量
-    combo_features   : 候选 combo 特征张量
-    combo_mask       : 有效掩码
-    temperature      : 采样温度，越小越确定性（0.1~5.0）
-    aggression       : 攻守倾向，>0 激进，<0 保守（-1.0~1.0）
-    attack_potentials: 每个 combo 的进攻潜力（由 features.py 计算）
-    defense_stabilities: 每个 combo 的防守稳定性
-    deterministic    : True 时等价于 temperature→0，直接 argmax
-
-    Returns
-    -------
-    int : 选中的 combo 在 combos 列表中的索引
-    """
     model.eval()
     with torch.no_grad():
-        logits = model(hand_tokens, combo_features, combo_mask)  # (1, K)
-        logits = logits.squeeze(0)   # (K,)
-        mask   = combo_mask.squeeze(0)  # (K,)
+        if isinstance(model, ActorCritic):
+            logits, _ = model(hand_tokens, combo_features, combo_mask)
+        else:
+            logits = model(hand_tokens, combo_features, combo_mask)
 
-        # ---- aggression 调整 ----
+        logits = logits.squeeze(0)
+        mask   = combo_mask.squeeze(0)
+
         if aggression != 0.0:
             if aggression > 0.0 and attack_potentials is not None:
-                ap = attack_potentials.squeeze(0)
-                logits = logits + aggression * ap
+                logits = logits + aggression * attack_potentials.squeeze(0)
             elif aggression < 0.0 and defense_stabilities is not None:
-                ds = defense_stabilities.squeeze(0)
-                logits = logits + (-aggression) * ds
+                logits = logits + (-aggression) * defense_stabilities.squeeze(0)
 
-        # ---- padding 屏蔽 ----
         logits = logits.masked_fill(mask == 0, float('-inf'))
 
         if deterministic:
             return int(logits.argmax().item())
 
-        # ---- 温度采样 ----
-        temperature = max(temperature, 1e-3)  # 防止除0
+        temperature = max(temperature, 1e-3)
         probs = F.softmax(logits / temperature, dim=-1)
-
-        # 替换 NaN（全为 -inf 时的防御）
         if torch.isnan(probs).any():
             valid_idx = (mask == 1).nonzero(as_tuple=True)[0]
             return int(valid_idx[0].item())
-
-        chosen = torch.multinomial(probs, num_samples=1)
-        return int(chosen.item())
+        return int(torch.multinomial(probs, num_samples=1).item())
 
 
 # ============================================================
-# 8.  难度预设
+# 10.  难度预设
 # ============================================================
 
 DIFFICULTY_PRESETS = {
@@ -330,19 +302,8 @@ DIFFICULTY_PRESETS = {
     "expert": {"temperature": 0.1, "aggression":  0.5},
 }
 
-
 def get_preset(difficulty: str) -> dict:
-    """
-    返回预设难度对应的 temperature 和 aggression 参数。
-
-    Parameters
-    ----------
-    difficulty : str
-        "easy" | "medium" | "hard" | "expert"
-    """
     key = difficulty.lower()
     if key not in DIFFICULTY_PRESETS:
-        raise ValueError(
-            f"未知难度 '{difficulty}'，可选: {list(DIFFICULTY_PRESETS.keys())}"
-        )
+        raise ValueError(f"未知难度 '{difficulty}'，可选: {list(DIFFICULTY_PRESETS.keys())}")
     return dict(DIFFICULTY_PRESETS[key])
