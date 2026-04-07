@@ -119,9 +119,9 @@ class TestInputUtils(unittest.TestCase):
 
     def test_card_name_english(self):
         from input import card_name
-        self.assertEqual(card_name(0),  "2D")
-        self.assertEqual(card_name(12), "AD")
-        self.assertEqual(card_name(51), "AS")
+        self.assertEqual(card_name(0),  "D2")
+        self.assertEqual(card_name(12), "DA")
+        self.assertEqual(card_name(51), "SA")
 
     def test_card_name_zh(self):
         from input import card_name
@@ -131,7 +131,7 @@ class TestInputUtils(unittest.TestCase):
     def test_hand_to_names(self):
         from input import hand_to_names
         names = hand_to_names([0, 13, 26, 39], zh=False)
-        self.assertEqual(names, ["2D", "2C", "2H", "2S"])
+        self.assertEqual(names, ["D2", "C2", "H2", "S2"])
 
     def test_deck_single_length(self):
         from input import deck_single
