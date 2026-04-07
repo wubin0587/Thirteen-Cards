@@ -59,6 +59,10 @@ PlayerRound::PlayerRound(const char* name)
     : Player(name), m_pat(nullptr), m_roundScore(-1), m_isSpecial(false)
 {
     /* m_pat 会在 receiveHand 时分配 */
+    m_specialResult.position = 3;
+    m_specialResult.hand_name = "Unknown";
+    m_specialResult.rank_order = 0;
+    m_specialResult.score = 0;
 }
 PlayerRound::~PlayerRound()
 {
@@ -82,6 +86,7 @@ int PlayerRound::receiveHand(const int hand13[13])
         m_roundScore = hr_special.score;
         addScore(hr_special.score);
         m_isSpecial = true;
+        m_specialResult = hr_special;
 
         /* 根据 hand_name 写入对应成就（可自行扩展） */
         if (strcmp(hr_special.hand_name, "Royal Straight Flush 13") == 0)
@@ -111,6 +116,10 @@ int PlayerRound::receiveHand(const int hand13[13])
     pattern_sort(m_pat);                     // hand 升序，后续判定更方便
     m_roundScore = -1;                       // 重置结算状态
     m_isSpecial  = false;
+    m_specialResult.position = 3;
+    m_specialResult.hand_name = "Unknown";
+    m_specialResult.rank_order = 0;
+    m_specialResult.score = 0;
     return 0;
 }
 
@@ -171,6 +180,22 @@ int PlayerRound::settle()
 
 /* 读取本局得分 ------------------------------------------------- */
 int PlayerRound::getRoundScore() const { return m_roundScore; }
+bool PlayerRound::isSpecialHand() const { return m_isSpecial; }
+HandResult PlayerRound::getSpecialResult() const { return m_specialResult; }
+int PlayerRound::getPositionResult(int position, HandResult* out) const
+{
+    if (!out) return -1;
+    if (position < 0 || position > 2) return -2;
+    if (m_isSpecial) return -3;
+    if (!m_pat) return -4;
+
+    int cards[5] = {0, 0, 0, 0, 0};
+    int cnt = (position == 0) ? 3 : 5;
+    if (pattern_get_position(m_pat, position, cards) != 0) return -5;
+
+    *out = search_pattern(position, cards, cnt);
+    return 0;
+}
 
 /* 重置局状态 ------------------------------------------------- */
 void PlayerRound::resetRound()
@@ -181,6 +206,10 @@ void PlayerRound::resetRound()
     }
     m_roundScore = -1;
     m_isSpecial = false;
+    m_specialResult.position = 3;
+    m_specialResult.hand_name = "Unknown";
+    m_specialResult.rank_order = 0;
+    m_specialResult.score = 0;
 }
 
 /*==================================================================
