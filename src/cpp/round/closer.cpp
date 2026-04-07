@@ -3,82 +3,6 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace {
-
-struct PairSettleResult {
-    int winner;      // 1: a胜, -1: b胜, 0: 平
-    int base_score;  // 基础输赢分（未乘倍率）
-    bool shoot_a;    // a 是否打枪（赢3墩）
-    bool shoot_b;    // b 是否打枪（赢3墩）
-};
-
-static int compare_hand_result(const HandResult& a, const HandResult& b)
-{
-    if (a.rank_order > b.rank_order) return 1;
-    if (a.rank_order < b.rank_order) return -1;
-    return 0;
-}
-
-static PairSettleResult settle_pair(PlayerRound* a, PlayerRound* b)
-{
-    PairSettleResult r = {0, 0, false, false};
-    if (!a || !b) return r;
-
-    // 特殊牌型：直接按特殊牌型等级比较（不参与打枪）
-    if (a->isSpecialHand() || b->isSpecialHand()) {
-        HandResult sa = a->getSpecialResult();
-        HandResult sb = b->getSpecialResult();
-        if (!a->isSpecialHand()) {
-            sa.rank_order = 0;
-            sa.score = 0;
-        }
-        if (!b->isSpecialHand()) {
-            sb.rank_order = 0;
-            sb.score = 0;
-        }
-        int cmp = compare_hand_result(sa, sb);
-        if (cmp > 0) {
-            r.winner = 1;
-            r.base_score = (sa.score > 0) ? sa.score : 0;
-        } else if (cmp < 0) {
-            r.winner = -1;
-            r.base_score = (sb.score > 0) ? sb.score : 0;
-        }
-        return r;
-    }
-
-    int score_sum = 0;
-    int win_a = 0, win_b = 0;
-    for (int pos = 0; pos < 3; ++pos) {
-        HandResult ha = {0, "Unknown", 0, 0};
-        HandResult hb = {0, "Unknown", 0, 0};
-        if (a->getPositionResult(pos, &ha) != 0) continue;
-        if (b->getPositionResult(pos, &hb) != 0) continue;
-
-        int cmp = compare_hand_result(ha, hb);
-        if (cmp > 0) {
-            score_sum += ha.score;
-            ++win_a;
-        } else if (cmp < 0) {
-            score_sum -= hb.score;
-            ++win_b;
-        }
-    }
-
-    r.shoot_a = (win_a == 3);
-    r.shoot_b = (win_b == 3);
-    if (score_sum > 0) {
-        r.winner = 1;
-        r.base_score = score_sum;
-    } else if (score_sum < 0) {
-        r.winner = -1;
-        r.base_score = -score_sum;
-    }
-    return r;
-}
-
-} // namespace
-
 /*
  * round_close
  * ----------
@@ -101,115 +25,69 @@ int round_close(Round* r) {
     if (n <= 0) return -3;            // 非法玩家数量
 
     // -------------------------------------------------
-    // 1) 逐玩家完成牌型结算（确保三墩结果可读取）
+    // 1) 结算每位玩家，收集得分
     // -------------------------------------------------
-    int* round_scores = (int*)malloc(sizeof(int) * n);
-    int* net_scores = (int*)malloc(sizeof(int) * n);
-    int* beat_cnt = (int*)malloc(sizeof(int) * n); // 用于判断全垒打
-    if (!round_scores || !net_scores || !beat_cnt) {
-        if (round_scores) free(round_scores);
-        if (net_scores) free(net_scores);
-        if (beat_cnt) free(beat_cnt);
-        return -4;
-    }
+    int* scores = (int*)malloc(sizeof(int) * n);
+    if (!scores) return -4;            // 内存分配失败
 
     for (int i = 0; i < n; ++i) {
         PlayerRound* pr = r->players[i];
-        net_scores[i] = 0;
-        beat_cnt[i] = 0;
         if (!pr) {
-            round_scores[i] = 0;
+            scores[i] = 0;
             continue;
         }
+        // settle() 返回本局总分，负数表示内部错误
         int rc = pr->settle();
-        round_scores[i] = (rc < 0) ? 0 : rc;
+        scores[i] = (rc < 0) ? 0 : rc;
     }
 
     // -------------------------------------------------
-    // 2) 两两比较，先得到基础结果并统计“击败人数”
-    // -------------------------------------------------
-    PairSettleResult* pair_results =
-        (PairSettleResult*)malloc(sizeof(PairSettleResult) * n * n);
-    if (!pair_results) {
-        free(round_scores);
-        free(net_scores);
-        free(beat_cnt);
-        return -4;
-    }
-    for (int i = 0; i < n * n; ++i) pair_results[i] = {0, 0, false, false};
-
-    for (int i = 0; i < n; ++i) {
-        for (int j = i + 1; j < n; ++j) {
-            PairSettleResult pr = settle_pair(r->players[i], r->players[j]);
-            pair_results[i * n + j] = pr;
-            if (pr.winner == 1) ++beat_cnt[i];
-            else if (pr.winner == -1) ++beat_cnt[j];
-        }
-    }
-
-    // -------------------------------------------------
-    // 3) 全垒打检测：击败所有其他玩家（倍率3，且不触发打枪）
-    // -------------------------------------------------
-    bool* homerun = (bool*)malloc(sizeof(bool) * n);
-    if (!homerun) {
-        free(pair_results);
-        free(round_scores);
-        free(net_scores);
-        free(beat_cnt);
-        return -4;
-    }
-    for (int i = 0; i < n; ++i) {
-        homerun[i] = (beat_cnt[i] == n - 1);
-    }
-
-    // -------------------------------------------------
-    // 4) 计算最终两两输赢：全垒打x3 > 打枪x2 > 基础分
+    // 2) 两两比较得分并打印结果
     // -------------------------------------------------
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
-            PairSettleResult pr = pair_results[i * n + j];
-            if (pr.winner == 0 || pr.base_score <= 0) continue;
+            const char* name_i = r->players[i]->getName();
+            const char* name_j = r->players[j]->getName();
 
-            int final_score = pr.base_score;
-            if (pr.winner == 1) {
-                if (homerun[i]) final_score *= 3;
-                else if (pr.shoot_a) final_score *= 2;
-                net_scores[i] += final_score;
-                net_scores[j] -= final_score;
+            if (scores[i] > scores[j]) {
+                std::printf("[WIN]  %s ( %d )  beats  %s ( %d )\n",
+                            name_i, scores[i], name_j, scores[j]);
+            } else if (scores[i] < scores[j]) {
+                std::printf("[LOSS] %s ( %d )  loses to %s ( %d )\n",
+                            name_i, scores[i], name_j, scores[j]);
             } else {
-                if (homerun[j]) final_score *= 3;
-                else if (pr.shoot_b) final_score *= 2;
-                net_scores[i] -= final_score;
-                net_scores[j] += final_score;
+                std::printf("[TIE]  %s ( %d )  =  %s ( %d )\n",
+                            name_i, scores[i], name_j, scores[j]);
             }
-
-            const char* name_i = r->players[i] ? r->players[i]->getName() : "P?";
-            const char* name_j = r->players[j] ? r->players[j]->getName() : "P?";
-            std::printf("[PAIR] %s vs %s => %d\n", name_i, name_j, final_score);
         }
     }
 
     // -------------------------------------------------
-    // 5) 输出全局结算与成就提示
+    // 3) 特殊成就提示（全垒打、至尊清龙等）
     // -------------------------------------------------
     for (int i = 0; i < n; ++i) {
         PlayerRound* pr = r->players[i];
         if (!pr) continue;
-        if (homerun[i]) {
-            std::printf("[ACHV] %s achieved 全垒打 (x3, no shoot bonus)\n",
+
+        // “全垒打” – 中墩或尾墩出现 Five of a Kind
+        if (pr->hasAchievement(ACHV_FIVE_OF_A_KIND_MIDDLE) ||
+            pr->hasAchievement(ACHV_FIVE_OF_A_KIND_TAIL)) {
+            std::printf("[ACHV] %s achieved 全垒打 (Five of a Kind)!\n",
                         pr->getName());
         }
-        std::printf("[ROUND] %s base=%d net=%d\n",
-                    pr->getName(), round_scores[i], net_scores[i]);
 
+        // “至尊清龙” – 13 张同花顺
         if (pr->hasAchievement(ACHV_ROYAL_STRAIGHT_FLUSH_13)) {
             std::printf("[ACHV] %s achieved 至尊清龙 (Royal Straight Flush 13)!\n",
                         pr->getName());
         }
+
+        // 其它成就可自行在此添加，例如：
+        // if (pr->hasAchievement(ACHV_STRAIGHT_13)) { ... }
     }
 
     // -------------------------------------------------
-    // 6) 清理每位玩家的局状态
+    // 4) 清理每位玩家的局状态
     // -------------------------------------------------
     for (int i = 0; i < n; ++i) {
         PlayerRound* pr = r->players[i];
@@ -219,7 +97,7 @@ int round_close(Round* r) {
     }
 
     // -------------------------------------------------
-    // 7) 释放本局牌堆并复位 Round
+    // 5) 释放本局牌堆并复位 Round
     // -------------------------------------------------
     if (r->deck) {
         free(r->deck);
@@ -228,10 +106,7 @@ int round_close(Round* r) {
     r->deck_type = 0;
     r->deck_pos  = 0;
 
-    free(pair_results);
-    free(homerun);
-    free(round_scores);
-    free(net_scores);
-    free(beat_cnt);
+    // 释放临时得分数组
+    free(scores);
     return 0;   // 成功
 }
