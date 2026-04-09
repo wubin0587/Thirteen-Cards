@@ -65,6 +65,13 @@ int tc_player_round_receive_hand(tc_player_round_t player, const int hand13[13])
     return p->receiveHand(hand13);
 }
 
+int tc_player_round_get_hand(tc_player_round_t player, int out13[13])
+{
+    PlayerRound* p = reinterpret_cast<PlayerRound*>(player);
+    if (!p) return -1;
+    return p->getHand(out13);
+}
+
 int tc_player_round_set_position(tc_player_round_t player, int position, const int* cards, int cnt)
 {
     PlayerRound* p = reinterpret_cast<PlayerRound*>(player);
