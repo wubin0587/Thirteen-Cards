@@ -56,7 +56,7 @@ bool Player::hasAchievement(Achievement a) const
  *  PlayerRound
  *==================================================================*/
 PlayerRound::PlayerRound(const char* name)
-    : Player(name), m_pat(nullptr), m_roundScore(-1), m_isSpecial(false), m_hasHand(false)
+    : Player(name), m_pat(nullptr), m_roundScore(-1), m_isSpecial(false)
 {
     /* m_pat 会在 receiveHand 时分配 */
     m_specialResult.position = 3;
@@ -78,8 +78,6 @@ PlayerRound::~PlayerRound()
 int PlayerRound::receiveHand(const int hand13[13])
 {
     if (!hand13) return -1;
-    memcpy(m_hand, hand13, sizeof(int) * 13);
-    m_hasHand = true;
 
     /* ---------- 1️⃣ 检测 13 张特殊牌型 ---------- */
     HandResult hr_special = search_pattern(3, const_cast<int*>(hand13), 13);
@@ -207,14 +205,6 @@ int PlayerRound::getPositionCards(int position, int* out_cards5) const
     return pattern_get_position(m_pat, position, out_cards5);
 }
 
-int PlayerRound::getHand(int out_hand13[13]) const
-{
-    if (!out_hand13) return -1;
-    if (!m_hasHand) return -2;
-    memcpy(out_hand13, m_hand, sizeof(int) * 13);
-    return 0;
-}
-
 /* 重置局状态 ------------------------------------------------- */
 void PlayerRound::resetRound()
 {
@@ -228,7 +218,6 @@ void PlayerRound::resetRound()
     m_specialResult.hand_name = "Unknown";
     m_specialResult.rank_order = 0;
     m_specialResult.score = 0;
-    m_hasHand = false;
 }
 
 /*==================================================================
