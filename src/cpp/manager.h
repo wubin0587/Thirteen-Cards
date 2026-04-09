@@ -27,6 +27,7 @@ int tc_dfs_enum_combos(const int hand13[13], DFSCandResult* out, int max_k);
 tc_player_round_t tc_player_round_create(const char* name);
 void tc_player_round_destroy(tc_player_round_t player);
 int tc_player_round_receive_hand(tc_player_round_t player, const int hand13[13]);
+int tc_player_round_get_hand(tc_player_round_t player, int out13[13]);
 int tc_player_round_set_position(tc_player_round_t player, int position, const int* cards, int cnt);
 int tc_player_round_settle(tc_player_round_t player);
 int tc_player_round_get_round_score(tc_player_round_t player);

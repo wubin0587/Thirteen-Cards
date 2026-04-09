@@ -70,6 +70,8 @@ private:
     int            m_roundScore; // 本局得分，-1 表示未结算
     bool           m_isSpecial;  // true 表示已经是特殊 13 张牌型
     HandResult     m_specialResult; // 特殊牌型缓存（非特殊时为 Unknown）
+    int            m_hand[13];
+    bool           m_hasHand;
 
 public:
     explicit PlayerRound(const char* name = "RoundPlayer");
@@ -96,6 +98,7 @@ public:
     HandResult getSpecialResult() const;
     int getPositionResult(int position, HandResult* out) const;
     int getPositionCards(int position, int* out_cards5) const;
+    int getHand(int out_hand13[13]) const;
     void resetRound();
 };
 
