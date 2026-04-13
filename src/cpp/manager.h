@@ -29,6 +29,7 @@ void tc_player_round_destroy(tc_player_round_t player);
 int tc_player_round_receive_hand(tc_player_round_t player, const int hand13[13]);
 int tc_player_round_set_position(tc_player_round_t player, int position, const int* cards, int cnt);
 int tc_player_round_settle(tc_player_round_t player);
+int tc_player_round_get_hand(tc_player_round_t player, int out_hand13[13]);
 int tc_player_round_get_round_score(tc_player_round_t player);
 int tc_player_round_get_total_score(tc_player_round_t player);
 const char* tc_player_round_get_name(tc_player_round_t player);

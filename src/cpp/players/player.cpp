@@ -196,6 +196,14 @@ int PlayerRound::getPositionResult(int position, HandResult* out) const
     *out = search_pattern(position, cards, cnt);
     return 0;
 }
+int PlayerRound::getHand(int out_hand13[13]) const
+{
+    if (!out_hand13) return -1;
+    if (!m_pat) return -2;
+
+    memcpy(out_hand13, m_pat->hand, sizeof(m_pat->hand));
+    return 0;
+}
 int PlayerRound::getPositionCards(int position, int* out_cards5) const
 {
     if (!out_cards5) return -1;

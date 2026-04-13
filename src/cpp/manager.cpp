@@ -79,6 +79,13 @@ int tc_player_round_settle(tc_player_round_t player)
     return p->settle();
 }
 
+int tc_player_round_get_hand(tc_player_round_t player, int out_hand13[13])
+{
+    PlayerRound* p = reinterpret_cast<PlayerRound*>(player);
+    if (!p || !out_hand13) return -1;
+    return p->getHand(out_hand13);
+}
+
 int tc_player_round_get_round_score(tc_player_round_t player)
 {
     PlayerRound* p = reinterpret_cast<PlayerRound*>(player);
