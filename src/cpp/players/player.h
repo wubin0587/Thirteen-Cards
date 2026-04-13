@@ -95,6 +95,7 @@ public:
     bool isSpecialHand() const;
     HandResult getSpecialResult() const;
     int getPositionResult(int position, HandResult* out) const;
+    int getHand(int out_hand13[13]) const;
     int getPositionCards(int position, int* out_cards5) const;
     void resetRound();
 };
