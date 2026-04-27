@@ -26,6 +26,8 @@ import platform
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+os.add_dll_directory(r"D:\Program Files (x86)\mingw64\bin")
+
 # ============================================================
 # 1.  共享库路径解析
 # ============================================================
@@ -37,7 +39,7 @@ def _default_lib_path() -> str:
     )
     system = platform.system()
     if system == "Windows":
-        name = "thirteen_cards_cpp.dll"
+        name = "libthirteen_cards_cpp.dll"
     elif system == "Darwin":
         name = "libthirteen_cards_cpp.dylib"
     else:
