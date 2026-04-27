@@ -41,6 +41,7 @@
 #include "score.h"
 
 #include <stdlib.h>
+#include <cstdint>
 #include <string.h>
 #include <stddef.h>
 #include <stdbool.h>
