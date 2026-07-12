@@ -1,0 +1,29 @@
+# Flutter
+build/
+.dart_tool/
+.packages
+*.iml
+.idea/
+.metadata
+
+# Windows
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.user
+*.suo
+*.obj
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.dll
+*.exe
+*.so
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
